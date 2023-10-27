@@ -1,0 +1,1 @@
+SQLITE_DATABASE = "./sqlite/database.db"
