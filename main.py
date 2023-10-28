@@ -4,6 +4,7 @@ from flask_cors import CORS
 import sqlite3
 from config import SQLITE_DATABASE
 import pandas as pd
+from random import random
 
 
 app = Flask(__name__)
@@ -13,8 +14,8 @@ CORS(app)
 def base_route():
     return "Server is running", 200
 
-@app.route("/retrieve")
-def retrieve_records():
+@app.route("/retrieve_locations")
+def retrieve_locations():
     try:
         conn = sqlite3.connect(SQLITE_DATABASE)
         cursor = conn.cursor()
@@ -51,6 +52,46 @@ def retrieve_records():
         conn.close()
         return json_data, 200
     except Exception as e:
+        print(e)
+        return f"Something went wrong when retrieving records: {e}", 500
+
+@app.route("/retrieve_sections")
+def retrieve_sections():
+    try:
+        conn = sqlite3.connect(SQLITE_DATABASE)
+        cursor = conn.cursor()
+
+        query = "SELECT * FROM sections;"
+        cursor.execute(query)
+        rows = cursor.fetchall()
+
+        column_names = [description[0] for description in cursor.description]
+        dict_rows = [dict(zip(column_names, row)) for row in rows]
+
+        formatted_data = [
+            {
+                "geometry": { 
+                    "x": row["x"],
+                    "y": row["y"],
+                    "width": row["width"],
+                    "height": row["height"],
+                    "type": "RECTANGLE"
+                },
+                "data": {
+                    "id": row['id'], 
+                    "text": row["text"],
+                }
+            }
+            for row in dict_rows
+        ]
+
+        json_data = json.dumps(formatted_data, indent=4)
+
+        conn.close()
+        return json_data, 200
+
+    except Exception as e:
+        print(e)
         return f"Something went wrong when retrieving records: {e}", 500
 
 @app.route("/update", methods=['POST'])
@@ -70,12 +111,19 @@ def update_sections():
         # Reset section column
         cursor.execute(f"UPDATE locations SET section = 'Others';")
 
+        cursor.execute(f"DELETE FROM sections;")
+
         for new_section in new_sections:
             section_name = str(new_section['text'])
-            x_min = float(new_section['x']) / 100 * img_width
-            x_max = x_min + img_width * int(new_section['width']) / 100
-            y_min = float(new_section['y']) / 100 * img_height
-            y_max = y_min + img_height * int(new_section['height']) / 100
+            x = float(new_section['x'])
+            y = float(new_section['y'])
+            width = float(new_section['width'])
+            height = float(new_section['height'])
+
+            x_min = x / 100 * img_width
+            x_max = x_min + img_width * width / 100
+            y_min = y / 100 * img_height
+            y_max = y_min + img_height * height / 100
 
             print(x_min, x_max, y_min, y_max)
 
@@ -85,11 +133,16 @@ def update_sections():
                 WHERE (x_pos BETWEEN {x_min} AND {x_max})
                 AND (y_pos BETWEEN {y_min} AND {y_max});""")
             
+            cursor.execute(f"""
+                INSERT INTO sections (x, y, width, height, text)
+                VALUES({x}, {y}, {width}, {height}, '{section_name}');""")
+            
         conn.commit()
         conn.close()
 
         return "Successfully updated sections", 200
     except Exception as e:
+        print(e)
         return f"Something went wrong when updating section: {e}", 500
 
 if __name__ == "__main__":
