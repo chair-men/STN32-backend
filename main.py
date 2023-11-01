@@ -2,10 +2,20 @@ import json
 from flask import Flask, request
 from flask_cors import CORS
 import sqlite3
-from config import SQLITE_DATABASE
+from config import SQLITE_DATABASE, DATABASE_URI
 import pandas as pd
-from random import random
+import os
+from dotenv import load_dotenv
+from langchain.chains import LLMMathChain
+from langchain.llms import OpenAI
+from langchain.utilities import SQLDatabase
+from langchain_experimental.sql import SQLDatabaseChain
+from langchain.agents import initialize_agent, Tool
+from langchain.agents import AgentType
+from llm_helper import greeting_tool, explanation_tool
 
+load_dotenv()
+llm = OpenAI(temperature=0.1, openai_api_key=os.getenv("OPENAI_API_KEY"))
 
 app = Flask(__name__)
 CORS(app)
@@ -144,6 +154,51 @@ def update_sections():
     except Exception as e:
         print(e)
         return f"Something went wrong when updating section: {e}", 500
+
+@app.route("/query_llm", methods=["POST"])
+def query_llm():
+    data = request.json
+    user_query = data['query']
+
+    llm_math_chain = LLMMathChain.from_llm(llm=llm)
+
+    db = SQLDatabase.from_uri(DATABASE_URI)
+    db_chain = SQLDatabaseChain.from_llm(db=db, llm=llm)
+
+    tools = [
+        Tool(
+            name="Greeting", 
+            func=greeting_tool,
+            description="Responds to common greetings",
+        ),
+        Tool(
+            name="Introduction", 
+            func=explanation_tool,
+            description="Responds to queries on the agent's usage",
+        ),
+        Tool(
+            name="Calculator",
+            func=llm_math_chain.run,
+            description="useful for when you need to answer questions about math",
+        ),
+        Tool(
+            name="SQLQuery",
+            func=db_chain.run,
+            description="""useful for when you need to answer questions about traffic in a certain area that is under surveillance. 
+            Input should be in the form of a question containing full context. The values in person_id indicates a unique person. 
+            The person_id may appear more than once, in a different x_pos and y_pos to show their coordinates. 
+            Counting the person_id column would mean to count the number of appearances of people, NOT the number of unique people. 
+            The area that is under surveillance can be partitioned into different sectors, as specified in the sections column. 
+            Any dates should be formatted as YYYY-MM-DD HH:MM:SS. For example, 20 January 22 should be a range from 2022-01-22 00:00:00 to 2022-01-22 23:59:59. 
+            When responding to questions on how many people/person, format your response with 'appearance of people/person' rather than just 'people/person|'.
+            """,
+        ),
+    ]
+
+    chatVM = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION)
+    response = chatVM.run(user_query)
+
+    return response
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", debug=True)
