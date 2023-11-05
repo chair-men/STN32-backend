@@ -5,6 +5,7 @@ import sqlite3
 from config import SQLITE_DATABASE, DATABASE_URI
 import pandas as pd
 import os
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from langchain.chains import LLMMathChain
 from langchain.llms import OpenAI
@@ -30,7 +31,10 @@ def retrieve_locations():
         conn = sqlite3.connect(SQLITE_DATABASE)
         cursor = conn.cursor()
 
-        query = "SELECT * FROM locations;"
+        days_before = int(request.args.get("before"))
+        date = datetime(2023, 10, 29 - days_before, 0, 0, 0).strftime("%Y-%m-%d")
+        query = f'SELECT * FROM locations WHERE timestamp LIKE "{date + "%"}";'
+
         cursor.execute(query)
         rows = cursor.fetchall()
 
@@ -51,9 +55,9 @@ def retrieve_locations():
             })
             bin_intervals = pd.date_range(start=df['timestamps'].min().floor('2H'), end=df['timestamps'].max().ceil('2H'), freq='2H')
             df['interval'] = pd.cut(df['timestamps'], bins=bin_intervals, right=False, include_lowest=True)
-            result = df.groupby('interval').size().reset_index(name='count')
+            result = df.groupby('interval', observed=False).size().reset_index(name='count')
 
-            filtered_df = result[result['interval'].apply(lambda x: x.left.date() == pd.Timestamp('2023-10-27').date())]
+            filtered_df = result[result['interval'].apply(lambda x: x.left.date() == pd.Timestamp(date).date())]
             formatted_result = [(str(intv.left.hour).zfill(2) + ":00", cnt) for intv, cnt in zip(filtered_df['interval'], filtered_df['count'])]
             sorted_results[section] = formatted_result
 
